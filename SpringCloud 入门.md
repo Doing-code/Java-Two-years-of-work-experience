@@ -3681,7 +3681,7 @@ Namespace+Group+Data ID三者关系？为什么这么设计？
 >
 > 回到服务管理-服务列表查看
 
-![](G:\eclipses workspace\GIT_workspace\gitee\introduction-to-springcloud\SpringCloud入门图集/image-20210616194242148.png)
+![](SpringCloud入门图集/image-20210616194242148.png)
 
 > 按照域名配置填写
 
@@ -3704,7 +3704,7 @@ spring:
 
 
 
-![](G:\eclipses workspace\GIT_workspace\gitee\introduction-to-springcloud\SpringCloud入门图集/image-20210616195158453.png)
+![](SpringCloud入门图集/image-20210616195158453.png)
 
 > namespace 包着 group  ，group 包着 DataId
 
@@ -3722,9 +3722,9 @@ spring:
 
 > 官网 ：https://nacos.io/zh-cn/docs/deployment.html
 
-![](G:\eclipses workspace\GIT_workspace\gitee\introduction-to-springcloud\SpringCloud入门图集/image-20210616200440141.png)
+![](SpringCloud入门图集/image-20210616200440141.png)
 
-![](G:\eclipses workspace\GIT_workspace\gitee\introduction-to-springcloud\SpringCloud入门图集/image-20210616200511775.png)
+![](SpringCloud入门图集/image-20210616200511775.png)
 
 
 
@@ -3732,7 +3732,7 @@ spring:
 
 > Nacos默认自带的是嵌入式数据库derby
 
-![](G:\eclipses workspace\GIT_workspace\gitee\introduction-to-springcloud\SpringCloud入门图集/image-20210616205555508.png)
+![](SpringCloud入门图集/image-20210616205555508.png)
 
 
 
@@ -3740,13 +3740,13 @@ spring:
 >
 > - 1、nacos-server-1.1.4\nacos\conf目录下找到sql脚本  nacos-mysql.sql
 
-![](G:\eclipses workspace\GIT_workspace\gitee\introduction-to-springcloud\SpringCloud入门图集/image-20210616205821618.png)
+![](SpringCloud入门图集/image-20210616205821618.png)
 
 > 先创建表 `nacos_config` ，然后在自己本机数据库 或者 linux 数据库中 执行 nacos-mysql.sql 脚本， 复制 粘贴 即可，
 
-![](G:\eclipses workspace\GIT_workspace\gitee\introduction-to-springcloud\SpringCloud入门图集/image-20210616210049789.png)
+![](SpringCloud入门图集/image-20210616210049789.png)
 
- ![](G:\eclipses workspace\GIT_workspace\gitee\introduction-to-springcloud\SpringCloud入门图集/image-20210616210134783.png)
+ ![](SpringCloud入门图集/image-20210616210134783.png)
 
 
 
@@ -3785,7 +3785,7 @@ spring:
 
 ### Nacos Linux版本安装
 
-![image-20210616213635307](G:\eclipses workspace\GIT_workspace\gitee\introduction-to-springcloud\SpringCloud入门图集/image-20210616213635307.png)
+![image-20210616213635307](SpringCloud入门图集/image-20210616213635307.png)
 
 三个 或 三个以上 Nacos 节点才能构成集群 。
 
