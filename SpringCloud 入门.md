@@ -2,8 +2,6 @@
 typora-copy-images-to: SpringCloud入门图集
 ---
 
-
-
 ## 四个纬度 学习新技术  思路
 
 - 是什么？
@@ -3796,6 +3794,336 @@ spring:
 > 官网 ：https://github.com/alibaba/nacos/releases/tag/1.1.4    nacos-server-1.1.4.tar.gz
 >
 > 解压后安装
+
+
+
+> 这里不做详细介绍
+>
+> 搭建 nacos 集群环境 https://www.cnblogs.com/linchenguang/p/12827582.html
+>
+> 安装 nginx  https://blog.csdn.net/qq_37345604/article/details/90034424
+
+
+
+> 新建 Model  ，model 配置过很多次了，这里不再赘述了。参数 `spring.cloud.naco.discovery.server-addr` 设置为 服务器 nginx 地址 即可 。
+
+```yaml
+server:
+  port: 9002
+
+spring:
+  application:
+    name: nacos-payment-provider
+  cloud:
+    nacos:
+      discovery:
+#        server-addr: localhost:8848 #配置Nacos地址
+        # 换成nginx的1111端口，做集群
+        server-addr: 192.168.0.188:1111
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+```
+
+> 运行 ：http://192.168.0.188:1111/
+
+![image-20210617210445087](SpringCloud入门图集/image-20210617210445087.png)
+
+
+
+
+
+
+
+## Sentinel 
+
+官网 ：https://github.com/alibaba/Sentinel    中文 ：https://github.com/alibaba/Sentinel/wiki/%E4%BB%8B%E7%BB%8D
+
+> A powerful flow control component enabling reliability, resilience and monitoring for microservices. (**面向云原生微服务的高可用流控防护组件**)
+>
+> The Sentinel of Your Microservices  --- 微服务的哨兵  能够监控你的微服务
+
+
+
+### 是什么？去哪下？能干嘛？怎么玩？
+
+> 同 Hystrix 功能一样 ，服务降级、服务熔断
+
+![image-20210617211415223](SpringCloud入门图集/image-20210617211415223.png)
+
+> 能干嘛 
+
+![image-20210617212002760](SpringCloud入门图集/image-20210617212002760.png)
+
+> 下载好 sentinel-dashboard-1.8.1.jar 之后，cmd  ，java -jar sentinel-dashboard-1.8.1.jar 启动
+
+![image-20210617212933407](SpringCloud入门图集/image-20210617212933407.png) 
+
+> 运行 http://localhost:8080/     账号密码都是 sentinel
+
+![image-20210617213234347](SpringCloud入门图集/image-20210617213234347.png)
+
+
+
+
+
+
+
+### 初始化监控
+
+- 1、启动 Nacos 8848
+
+- 2、新建 Module
+
+	- cloudalibaba-sentinel-service8401
+
+		![image-20210617213559084](SpringCloud入门图集/image-20210617213559084.png)
+
+	- POM  引入依赖 
+
+	```pom
+	        <!--SpringCloud ailibaba nacos -->
+	        <dependency>
+	            <groupId>com.alibaba.cloud</groupId>
+	            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+	        </dependency>
+	        <!--SpringCloud ailibaba sentinel-datasource-nacos 后续做持久化用到-->
+	        <dependency>
+	            <groupId>com.alibaba.csp</groupId>
+	            <artifactId>sentinel-datasource-nacos</artifactId>
+	        </dependency>
+	        <!--SpringCloud ailibaba sentinel -->
+	        <dependency>
+	            <groupId>com.alibaba.cloud</groupId>
+	            <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+	        </dependency>
+	```
+
+	- YML
+
+	```yaml
+	server:
+	  port: 8401
+	
+	spring:
+	  application:
+	    name: cloudalibaba-sentinel-service
+	  cloud:
+	    nacos:
+	      discovery:
+	        server-addr: localhost:8848 #Nacos服务注册中心地址
+	    sentinel:
+	      transport:
+	        dashboard: localhost:8080 #配置Sentinel dashboard地址
+	        # 默认8719端口, 假如被占用会自动从8719开始依次+1扫描,直到找到未被占用的端口.
+	        port: 8719
+	
+	management:
+	  endpoints:
+	    web:
+	      exposure:
+	        include: '*'
+	```
+
+	
+
+	- 主启动类
+
+	```java
+	@EnableDiscoveryClient
+	@SpringBootApplication
+	public class MainApp8401{
+	    public static void main(String[] args) {
+	        SpringApplication.run(MainApp8401.class, args);
+	    }
+	}
+	```
+
+	- 业务类 controller
+
+	```java
+	@RestController
+	@Slf4j
+	public class FlowLimitController{
+	    @GetMapping("/testA")
+	    public String testA(){
+	        return "------testA";
+	    }
+	
+	    @GetMapping("/testB")
+	    public String testB(){
+	        log.info(Thread.currentThread().getName()+"\t"+"...testB");
+	        return "------testB";
+	    }
+	}
+	```
+
+	
+
+- 3、启动 Sentinel 8080
+
+- 4、启动微服务 8401
+
+- 5、查看 sentienl 控制台 
+
+> Sentinel采用的懒加载，需先运行 8401   http://localhost:8401/testA   http://localhost:8401/testB  ，再次查看 sentienl 控制台 即可 。
+
+![image-20210617214936215](SpringCloud入门图集/image-20210617214936215.png)
+
+
+
+
+
+
+
+### 流控规则
+
+名词解释说明
+
+![image-20210617215956096](SpringCloud入门图集/image-20210617215956096.png)
+
+![image-20210617220100053](SpringCloud入门图集/image-20210617220100053.png)
+
+
+
+
+
+#### 流控模式-QPS -直接失败
+
+![image-20210617221353247](SpringCloud入门图集/image-20210617221353247.png)
+
+> QPS  每秒钟请求数 ，此时我设置的是 ，一秒钟一个请求，如果操作这个规则，假设一秒钟两个请求，那么就直接报错，直接失败
+
+![image-20210617220602211](SpringCloud入门图集/image-20210617220602211.png)
+
+会出现下图的默认错误
+
+![image-20210617220741712](SpringCloud入门图集/image-20210617220741712.png)
+
+
+
+#### 流控模式-线程数直接失败
+
+> 同一时间线程数达到阀值后直接失败。
+
+![image-20210617222054231](SpringCloud入门图集/image-20210617222054231.png)
+
+
+
+
+
+#### 流控模式-关联 
+
+> **当关联的资源达到阈值时，就限流自己**，当与A关联的资源B达到阀值后，就限流A自己，一句话 ：B惹事，A挂了
+
+测试 http://localhost:8401/testB  一秒钟多次请求 。
+
+此时 请求 `/testB` 一秒钟只允许一次请求，我们可以使用 jMeter 测试，一秒钟多次请求。超过了` /testB` 的阀值。那么此时会造成`/testA` 直接挂了
+
+![image-20210617223017407](SpringCloud入门图集/image-20210617223017407.png)
+
+![image-20210617222723916](SpringCloud入门图集/image-20210617222723916.png)
+
+
+
+
+
+
+
+#### 流控效果 -预热
+
+> 直接->快速失败(默认的流控处理)
+
+![image-20210617223458839](SpringCloud入门图集/image-20210617223458839.png)
+
+> 结果就是 直接失败，抛出异常   `Blocked by Sentinel (flow limiting)`
+>
+> 源码 `com.alibaba.csp.sentinel.slots.block.flow.controllerDefaulstController` 
+
+
+
+
+
+![image-20210617224103938](SpringCloud入门图集/image-20210617224103938.png)
+
+> **默认coldFactor为3，即请求 QPS 从 threshold / 3 开始，经预热时长逐渐升至设定的 QPS 阈值。** 
+
+![image-20210617224631212](SpringCloud入门图集/image-20210617224631212.png)
+
+> 上图解释 ：`/testA` 我希望每秒钟能承受 10 QPS，一开始 单机阈值就是 3，但是给系统 5 s 的预热时间（缓冲时间），5 s 以后 从 3 慢慢过渡到 10 QPS
+>
+> 系统初始化的阀值为10 / 3 约等于3,即阀值刚开始为3；然后过了5秒后阀值才慢慢升高恢复到10     
+
+何以证明 默认 coldFactor 是3呢 ？看源码 
+
+源码  ： `com.alibaba.csp.sentinel.slots.block.flow.controller.WarmUpController`
+
+![image-20210617224430814](SpringCloud入门图集/image-20210617224430814.png)
+
+**应用场景**
+
+> 如：秒杀系统在开启的瞬间，会有很多流量上来，很有可能把系统打死，预热方式就是把为了保护系统，可慢慢的把流量放进来，慢慢的把阀值增长到设置的阀值。
+
+
+
+
+
+#### 排队等待
+
+>  匀速排队，让请求以均匀的速度通过，阀值类型必须设成QPS，否则无效。
+>
+> 设置含义：/testA每秒1次请求，超过的话就排队等待，等待的超时时间为20000毫秒。   
+
+![image-20210617225709432](SpringCloud入门图集/image-20210617225709432.png)
+
+**原理** 
+
+> 匀速排队，阈值必须设置为QPS
+
+![image-20210617225814230](SpringCloud入门图集/image-20210617225814230.png)
+
+
+
+**源码** 
+
+> `com.alibaba.csp.sentinel.slots.block.flow.controller.RateLimiterController`
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
