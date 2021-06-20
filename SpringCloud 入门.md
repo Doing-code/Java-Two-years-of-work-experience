@@ -4101,6 +4101,42 @@ management:
 
 
 
+### 降级
+
+#### 是什么？去哪下？能干嘛？怎么玩？
+
+熔断降级
+
+官网
+
+> https://github.com/alibaba/Sentinel/wiki/%E7%86%94%E6%96%AD%E9%99%8D%E7%BA%A7
+
+
+
+![image-20210620141157408](SpringCloud入门图集/image-20210620141157408.png)
+
+-  RT（平均响应时间，秒级）   
+	- 平均响应时间  超出阈值 且  在时间窗口内通过的请求>=5，两个条件同时满足后触发降级   
+	- 熔断时长(过后关闭断路器  
+	-  RT最大4900（更大的需要通过-Dcsp.sentinel.statistic.max.rt=XXXX才能生效） 
+- 异常比列（秒级）  
+	- QPS >= 5 且异常比例（秒级统计）超过阈值时，触发降级；熔断时长(结束后，关闭降级 异常数（分钟级）  
+-  异常数（分钟统计）
+	- 超过阈值时，触发降级；熔断时长(结束后，关闭降级   
+
+![image-20210620141250822](SpringCloud入门图集/image-20210620141250822.png)
+
+> **说明** 
+
+Sentinel 熔断降级会在调用链路中某个资源出现不稳定状态时（例如调用超时或异常比例升高），对这个资源的调用进行限制，让请求快速失败，避免影响到其它的资源而导致级联错误。
+
+当资源被降级后，在接下来的降级时间窗口之内，对该资源的调用都自动熔断（默认行为是抛出 DegradeException）。
+
+值得注意的是 ：
+
+Sentinel的断路器是没有半开状态的
+
+> 半开的状态系统自动去检测是否请求有异常，没有异常就关闭断路器恢复使用，有异常则继续打开断路器不可用。具体可以参考Hystrix
 
 
 
@@ -4108,6 +4144,81 @@ management:
 
 
 
+#### RT
+
+> 慢调用比例 (`SLOW_REQUEST_RATIO`)：选择以慢调用比例作为阈值，需要设置允许的慢调用 RT（即最大的响应时间），请求的响应时间大于该值则统计为慢调用。当单位统计时长（`statIntervalMs`）内请求数目大于设置的最小请求数目，并且慢调用的比例大于阈值，则接下来的熔断时长内请求会自动被熔断。经过熔断时长后熔断器会进入探测恢复状态（HALF-OPEN 状态），若接下来的一个请求响应时间小于设置的慢调用 RT 则结束熔断，若大于设置的慢调用 RT 则会再次被熔断
+
+![image-20210620153327285](SpringCloud入门图集/image-20210620153327285.png)
+
+
+
+![image-20210620144101257](SpringCloud入门图集/image-20210620144101257.png)
+
+> 一秒中进来 5 个请求，并且 200 毫秒处理一次任务。
+>
+> 如果一秒钟持续进入 10 个请求， 且 200 毫秒还没处理完，在未来 1 秒钟的熔断时长内，断路器打开，微服务不可用 。
+
+使用 jMeter 压测
+
+![image-20210620152019890](SpringCloud入门图集/image-20210620152019890.png)
+
+
+
+
+
+#### 异常比例
+
+> - 异常比例 (`ERROR_RATIO`)：当单位统计时长（`statIntervalMs`）内请求数目大于设置的最小请求数目，并且异常的比例大于阈值，则接下来的熔断时长内请求会自动被熔断。经过熔断时长后熔断器会进入探测恢复状态（HALF-OPEN 状态），若接下来的一个请求成功完成（没有错误）则结束熔断，否则会再次被熔断。异常比率的阈值范围是 `[0.0, 1.0]`，代表 0% - 100%。
+
+![image-20210620153435857](SpringCloud入门图集/image-20210620153435857.png)
+
+
+
+![image-20210620153624079](SpringCloud入门图集/image-20210620153624079.png)
+
+> 正确率 在 80%，10个请求，最多出现两个异常数，低于 80% ，熔断时长内该服务不可用
+
+- 业务类 controller
+
+```java
+    @GetMapping("/testD")
+    public String testD()
+    {
+        log.info("testD 异常比例");
+        int age = 10/0;
+        return "------testD";
+    }
+```
+
+
+
+jMeter 测试 
+
+![image-20210620153823727](SpringCloud入门图集/image-20210620153823727.png)
+
+> 停掉 jMeter ，再次请求`/testD`，会发现会抛出异常 ，`RunntimeException` 
+
+原因是 ，不满足熔断条件 ，一秒钟只有一个请求，没有超过阀值 ，系统抛出 `RunntimeException` 异常
+
+![image-20210620154328596](SpringCloud入门图集/image-20210620154328596.png)
+
+
+
+
+
+#### 异常数
+
+- 异常数 (`ERROR_COUNT`)：当单位统计时长内的异常数目超过阈值之后会自动进行熔断。经过熔断时长后熔断器会进入探测恢复状态（HALF-OPEN 状态），若接下来的一个请求成功完成（没有错误）则结束熔断，否则会再次被熔断。
+
+![image-20210620154724969](SpringCloud入门图集/image-20210620154724969.png)
+
+
+
+![image-20210620155152406](SpringCloud入门图集/image-20210620155152406.png)
+
+> 异常数 达到 5 次后 ，先熔断后降级 。
+
+![image-20210620155343454](SpringCloud入门图集/image-20210620155343454.png)
 
 
 
@@ -4115,19 +4226,96 @@ management:
 
 
 
+#### 热点规则
+
+相当于 Hystrix 兜底方法规则。`HystrixCommand` 
+
+>  何为热点。热点即经常访问的数据，很多时候我们希望统计或者限制某个热点数据中访问频次最高的TopN数据，并对其访问进行限流或者其它操作   
+
+**官网：** https://github.com/alibaba/Sentinel/wiki/%E7%83%AD%E7%82%B9%E5%8F%82%E6%95%B0%E9%99%90%E6%B5%81
+
+![image-20210620163806616](SpringCloud入门图集/image-20210620163806616.png)
+
+
+
+![image-20210620165038888](SpringCloud入门图集/image-20210620165038888.png)
+
+
+
+**源码** 
+
+- `com.alibaba.csp.sentinel.slots.block.BlockException` 
+
+
+
+**业务实现** 
+
+```java
+public class FlowLimitController{
+    @GetMapping("/testHotKey")
+    @SentinelResource(value = "testHotKey",blockHandler = "deal_testHotKey")
+    public String testHotKey(@RequestParam(value = "p1",required = false) String p1,
+                             @RequestParam(value = "p2",required = false) String p2){
+        return "------testHotKey";
+    }
+     // 兜底的方法，
+    public String deal_testHotKey (String p1, String p2, BlockException exception){
+        return "------deal_testHotKey,o(╥﹏╥)o";  //sentinel系统默认的提示：Blocked by Sentinel (flow limiting)
+    }
+}    
+```
+
+> blockHandler="" 指定兜底的方法名
+
+
+
+**配置**
+
+> 方法testHotKey里面第一个参数只要QPS超过每秒1次，马上降级处理 。一秒钟只允许一个请求访问，如果超过一个请求，则执行 deal_testHotkey() 兜底方法 。
+
+![image-20210620213049520](SpringCloud入门图集/image-20210620213049520.png)
+
+![image-20210620213829285](SpringCloud入门图集/image-20210620213829285.png)
+
+> 测试   http://localhost:8401/testHotkey?p1=a
+
+![image-20210620214011477](SpringCloud入门图集/image-20210620214011477.png)
+
+**注意 ：** 
+
+- 如果用到了热点规则注解，请一定要加上 blockHandler="" 指定兜底处理方法，如果不加 blockHandler=""，error Page会打印到页面，不友好
+
+![image-20210620214449746](SpringCloud入门图集/image-20210620214449746.png)
 
 
 
 
 
+##### 参数例外项
+
+![image-20210620214908093](SpringCloud入门图集/image-20210620214908093.png)
+
+**添加配置** 
+
+![image-20210620215117555](SpringCloud入门图集/image-20210620215117555.png)
+
+> 结合上述配置解释 ，p1 QPS 超过每秒一个则限流，（参数例外项）但是如果 p1=5 时，允许p1 QPS 为 200
 
 
 
+**如果出现 Java RunntimeException 异常** 
 
-
-
-
-
+>  @SentinelResource
+>
+> - 处理的是Sentinel控制台配置的违规情况，有blockHandler方法配置的兜底处理；
+>
+>  RuntimeException
+>
+> - int age = 10/0,这个是java运行时报出的运行时异常RunTimeException，@SentinelResource不管
+>
+> 总结 
+>
+> - @SentinelResource主管配置出错，运行出错该走异常走异常
 
 
 
