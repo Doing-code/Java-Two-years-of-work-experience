@@ -4339,23 +4339,85 @@ public class FlowLimitController{
 
 
 
+### SentinelResource 
+
+引入 pom 相关依赖 
+
+```pom
+<parent>
+     <artifactId>cloud2020</artifactId>
+     <groupId>com.atguigu.springcloud</groupId>
+     <version>1.0-SNAPSHOT</version>
+</parent>
+
+<dependency><!-- 引入自己定义的api通用包，可以使用Payment支付Entity -->
+     <groupId>com.atguigu.springcloud</groupId>
+     <artifactId>cloud-api-commons</artifactId>
+     <version>${project.version}</version>
+</dependency>
+```
+
+业务类 RateLimitController
+
+```java
+public class RateLimitController
+{
+    @GetMapping("/byResource")
+    @SentinelResource(value = "byResource",blockHandler = "handleException")
+    public CommonResult byResource() {
+        return new CommonResult(200,"按资源名称限流测试OK",new Payment(2020L,"serial001"));
+    }
+    public CommonResult handleException(BlockException exception) {
+        return new CommonResult(444,exception.getClass().getCanonicalName()+"\t 服务不可用");
+    }
+}
+```
 
 
 
+<hr/>
+
+可以按照 url 地址进行限流，也可以按照资源名称进行限流 。
+
+![image-20210621212211905](SpringCloud入门图集/image-20210621212211905.png)
 
 
 
+不过上诉方案也面临的 跟 Hystrix 同样的问题 
+
+>  1  系统默认的，没有体现我们自己的业务要求。 
+>
+> 2 依照现有条件，我们自定义的处理方法又和业务代码耦合在一块，不直观。 
+>
+> 3 每个业务方法都添加一个兜底的，那代码膨胀加剧。
+>
+> 4 全局统一的处理方法没有体现。 
+
+```java
+@GetMapping("/rateLimit/customerBlockHandler")
+@SentinelResource(value = "customerBlockHandler",
+        blockHandlerClass = CustomerBlockHandler.class,
+        blockHandler = "handlerException2")
+public CommonResult customerBlockHandler() {
+    return new CommonResult(200,"按客戶自定义",new Payment(2020L,"serial003"));
+}
+```
+
+```java
+value=""唯一名称 . blockHandlerClass="" 指定哪个类兜底处理. blockHandler="" 指定兜底类的哪个方法处理异常
+```
+
+注意 ： 兜底类的处理方法 必须是 静态方法 也就是 static 修饰的方法 。
+
+![image-20210621221507482](SpringCloud入门图集/image-20210621221507482.png)
 
 
 
+<br/>
 
+更多注解属性说明
 
-
-
-
-
-
-
+![image-20210621222641644](SpringCloud入门图集/image-20210621222641644.png)
 
 
 

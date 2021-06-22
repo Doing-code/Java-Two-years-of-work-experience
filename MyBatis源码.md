@@ -1126,21 +1126,915 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
 
 也就是说，getMapper() 方法返回的是一个 JDK 动态代理对象（类型是 $Proxy+数字）。这个代理对象会继承 Proxy 类，实现被代理的接口UserMapper，内部持有一个 MapperProxy 类型的触发管理类 。
 
+当我们调用UserMapperr 的方法时候，实质上调用的是 MapperProxy 的 invoke() 方法 。
+
+![image-20210622075648492](MyBatis源码图集/image-20210622075648492.png)
+
+
+
+![image-20210622083356542](MyBatis源码图集/image-20210622083356542.png)
+
+> 在  UML 类图中，空心三角线+虚线表示实现关系，类与接口之间的关系 。
+>
+> 虚线箭头表示 依赖关系 。
+
+<br/>
+
+现在我们来回答前面的问题 ：
+
+<br/>
+
+为什么要在 MapperRegistry 类中保存一个工厂类，原因是它用来创建并返回代理类。这里的代理模式是一个非常经典的应用 。
+
+MapperProxy 如何实现对接口的代理 ？
+
+我们知道，JDK 动态代理有三个核心角色 ：
+
+- 被代理类 （就是实现类）
+- 接口
+- 实现了 InvocationHandler 接口的触发管理类，用来生成代理对象 。
+
+被代理类必须实现接口，因为要通过接口获取方法，而且代理类也要实现这个接口 
+
+![image-20210622085257532](MyBatis源码图集/image-20210622085257532.png)
+
+但是 MyBatis 并没有 Mapper 接口的实现类，怎么被代理呢？
+
+因为它忽略了实现类，直接对 Mapper 接口进行代理 。
+
+MyBatis 动态代理 ：
+
+![image-20210622090712215](MyBatis源码图集/image-20210622090712215.png)
+
+在 MyBatis 中，JDK 动态代理为什么不需要实现类呢 ？
+
+这里其实就是根据一个可以执行的方法，直接找到 Mapper.xml 中 statementId，方便调用 。
+
+最后返回的 userMapper对象就是 MapperProxyFactory 创建的代理对象 。然后这个对象包含了 MapperProxy 对象 。
+
+
+
+### 问题三：怎么根据 Mapper.java 找到 Mapper.xml的 ？
+
+最后我们调用的 `userMapper.selectUserById()` ，本质上调用的是 MapperProxy的 invoke() 方法 。
+
+![image-20210622091616140](MyBatis源码图集/image-20210622091616140.png)
+
+如何根据 接口+方法名 找到 StatementId ，这个逻辑在 InvocationHandler 的子类 ( MapperProxy 类 ) 中就可以完成了，其实也就没有必要在用实现类了 。
+
+自此上面三个问题已经全部解决 。
+
+
+
+### 整个流程 
+
+![image.png](MyBatis源码图集/1608962218834-a6b8337c-d20c-408a-849b-5433ea5f1e28.png)
+
+到这步为止，我们已经拿到了 UserMapper 接口的代理对象 。接下来我们就去调用这个代理对象的方法 。
 
 
 
 
 
+## UserMapper中的方法和 SQL 关联 
+
+```java
+User user = userMapper.selectById(1));
+```
+
+通过前面的分析，我们已经知道 UserMapper 对象 是通过代理生成的代理对象。所以调用这个代理对象的任意方法都是执行触发器类 MapperProxy 的  invoke () 方法 。
+
+分为两部分 ：
+
+- 1、MapperProxy.invoke() 到 Executor.query() 方法和 SQL 关联 
+- 2、Executor.query() 到 JDBC 的 SQL 执行 。
+
+### 第一部分 
+
+![image-20210622102644565](MyBatis源码图集/image-20210622102644565.png)
+
+#### MapperProxy.invoke()
+
+先来看 MapperProxy 的 invoke() 方法有什么逻辑 
+
+```java
+public class MapperProxy<T> implements InvocationHandler, Serializable {
+	public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        // 这里是一个很标准的JDK动态代理
+        // 执行的时候会调用invoke()方法
+        try {
+            // 判断方法所属的类.是不是调用的Object默认的方法
+            // 如果是,则不代理,不改变原先方法的行为 
+            if (Object.class.equals(method.getDeclaringClass())) {
+                return method.invoke(this, args);
+            }
+
+            /**
+            对于默认方法的处理
+            判断是否为default方法,即接口中定义的默认方法.
+            如果是接口中的默认方法则把方法绑定到代理对象中然后调用
+            ......
+            */ 
+            if (this.isDefaultMethod(method)) {
+                return this.invokeDefaultMethod(proxy, method, args);
+            }
+        } catch (Throwable var5) {
+            throw ExceptionUtil.unwrapThrowable(var5);
+        }
+
+        // 如果不是默认方法,则真正执行MyBatis代理逻辑
+        // 获取MapperMethod代理对象  
+        MapperMethod mapperMethod = this.cachedMapperMethod(method);
+        // 执行   
+        return mapperMethod.execute(this.sqlSession, args);
+    }
+}
+```
+
+从缓存获取 MapperMethod ，这里加入了缓存主要是为了提升 MapperMethod 的获取速度。这个设计非常的有意思，缓存的使用在 MyBatis 中也是非常之多 。
+
+```java
+private final Map<Method, MapperMethod> methodCache;
+private MapperMethod cachedMapperMethod(Method method) {
+     MapperMethod mapperMethod = (MapperMethod)this.methodCache.get(method);
+     if (mapperMethod == null) {
+          mapperMethod = new MapperMethod(this.mapperInterface, method, this.sqlSession.getConfiguration());
+          this.methodCache.put(method, mapperMethod);
+     }
+
+     return mapperMethod;
+}
+```
+
+动态代理会有缓存,如果缓存中有则直接从缓存中拿，如果缓存中没有则创建一个然后放入缓存中，因为动态代理是很耗资源的 。
+
+<br/>
+
+```java
+
+/** 这个方法内部首先会判断SQL的类型.SELECT|DELETE|UPDATE|INSERT，用select举例,判断SQL类型为SELECT之后,就开始判断返回值类型,根据不同的情况做不同的操作,然后开始获取参数 -> 执行SQL */
+// MapperMethod.class
+// executr()这里是真正执行SQL的地方
+public Object execute(SqlSession sqlSession, Object[] args) {
+    Object result;
+    // 判断是哪一个SQL语句
+    switch (command.getType()) {
+      case INSERT: {
+      Object param = method.convertArgsToSqlCommandParam(args);
+        result = rowCountResult(sqlSession.insert(command.getName(), param));
+        break;
+      }
+      case UPDATE: {
+        Object param = method.convertArgsToSqlCommandParam(args);
+        result = rowCountResult(sqlSession.update(command.getName(), param));
+        break;
+      }
+      case DELETE: {
+        Object param = method.convertArgsToSqlCommandParam(args);
+        result = rowCountResult(sqlSession.delete(command.getName(), param));
+        break;
+      }
+        // 🌰栗子为SELECT
+      case SELECT:
+            // 判断是否有返回值
+        if (method.returnsVoid() && method.hasResultHandler()) {
+            // 无返回值
+          executeWithResultHandler(sqlSession, args);
+          result = null;
+        } else if (method.returnsMany()) {
+            // 返回值多行(多参数),这里调用这个方法
+          result = executeForMany(sqlSession, args); 🏀
+        } else if (method.returnsMap()) {
+            // 返回Map
+          result = executeForMap(sqlSession, args);
+        } else if (method.returnsCursor()) {
+            // 返回Cursor
+          result = executeForCursor(sqlSession, args);
+        } else {
+          Object param = method.convertArgsToSqlCommandParam(args);
+          result = sqlSession.selectOne(command.getName(), param);
+        }
+        break;
+      case FLUSH:
+        result = sqlSession.flushStatements();
+        break;
+      default:
+        throw new BindingException("Unknown execution method for: " + command.getName());
+    }
+    if (result == null && method.getReturnType().isPrimitive() && !method.returnsVoid()) {
+      throw new BindingException("Mapper method '" + command.getName() 
+          + " attempted to return null from a method with a primitive return type (" + method.getReturnType() + ").");
+    }
+    return result;
+  }
+```
+
+<br/>
+
+继续看 MapperMethod 这个类 ，它定义了两个属性 command 和 method，以及两个静态内部类 。
+
+```java
+public class MapperMethod {
+    private final MapperMethod.SqlCommand command;
+    private final MapperMethod.MethodSignature method;
+     
+     public static class SqlCommand {
+        private final String name;
+        private final SqlCommandType type;
+
+        public SqlCommand(Configuration configuration, Class<?> mapperInterface, Method method) {
+             String methodName = method.getName();
+             Class<?> declaringClass = method.getDeclaringClass();
+             // 获取 MappedStatement 对象 
+             MappedStatement ms = this.resolveMappedStatement(mapperInterface, methodName, declaringClass, configuration);
+             // 如果 MappedStatement 对象为空
+             if (ms == null) {
+                  if (method.getAnnotation(Flush.class) == null) {
+                       // 抛出 BindingException 异常, 找不到 MappedStatement, 说明该方法上, 没有对应的 SQL 生命 .
+                       throw new BindingException("Invalid bound statement (not found): " + mapperInterface.getName() + "." + methodName);
+                  }
+                  // 如果有 @Flush 注解, 则标记为 Flush 类型 
+                  this.name = null;
+                  this.type = SqlCommandType.FLUSH;
+             // 找到了 MappedStatement      
+             } else {
+                  // id=com.tian.mybatis.mapper.UserMapper.selectById
+                  this.name = ms.getId();
+                  // type=SELECT
+                  this.type = ms.getSqlCommandType();
+                  if (this.type == SqlCommandType.UNKNOWN) {
+                       throw new BindingException("Unknown execution method for: " + this.name);
+                  }
+             }
+
+          }
+
+          public String getName() {
+               return this.name;
+          }
+
+          public SqlCommandType getType() {
+               return this.type;
+          }
+
+          private MappedStatement resolveMappedStatement(Class<?> mapperInterface, String methodName, Class<?> declaringClass, Configuration configuration) {
+               // 获得编号, com.tian.mybatis.mapper.UserMapper.selectById
+               String statementId = mapperInterface.getName() + "." + methodName;
+               // 如果配置类中存在 该编号
+               if (configuration.hasStatement(statementId)) {
+                    // (MappedStatement)this.mappedStatements.get(id);
+                    // 前面解析配置文件的时候创建并保存的 Map<String, MappedStatement> mappedStatements
+                    return configuration.getMappedStatement(statementId);
+               } else if (mapperInterface.equals(declaringClass)) {
+                    return null;
+               } else {
+                    Class[] var6 = mapperInterface.getInterfaces();
+                    int var7 = var6.length;
+                    // 遍历父接口, 继续获得 MappedStatment 对象
+                    for(int var8 = 0; var8 < var7; ++var8) {
+                         Class<?> superInterface = var6[var8];
+                         if (declaringClass.isAssignableFrom(superInterface)) {
+                              MappedStatement ms = this.resolveMappedStatement(superInterface, methodName, declaringClass, configuration);
+                              if (ms != null) {
+                                   return ms;
+                              }
+                         }
+                    }
+				// 找不到, 返回 null
+                    return null;
+               }
+          }
+     }
+}
+public static class MethodSignature {
+    private final boolean returnsMap;
+    private final Class<?> returnType;
+    private final Integer rowBoundsIndex;
+    //....
+}
+```
+
+![image-20210622104824739](MyBatis源码图集/image-20210622104824739.png)
+
+SqlCommand 封装了 statementId ，比如说 ：
+
+```java
+com.tian.mybatis.mapper.UserMapper.selectById
+```
+
+和 SQL 类型 
+
+```java
+public enum SqlCommandType {
+    UNKNOWN,
+    INSERT,
+    UPDATE,
+    DELETE,
+    SELECT,
+    FLUSH;
+
+    private SqlCommandType() {
+    }
+}
+```
+
+另外还有个属性 MethodSignature，主要封装的是返回值的类型和方法入参。
+
+![image-20210622105336996](MyBatis源码图集/image-20210622105336996.png)
+
+<br/>
+
+#### **MapperMethod.execute()** 
+
+先来看看 `execute()` 方法的整体逻辑
+
+```java
+
+// MapperMethod.class
+// executr()这里是真正执行SQL的地方
+public Object execute(SqlSession sqlSession, Object[] args) {
+    Object result;
+    // 判断是哪一个SQL语句
+    switch (command.getType()) {
+      case INSERT: {
+      Object param = method.convertArgsToSqlCommandParam(args);
+        result = rowCountResult(sqlSession.insert(command.getName(), param));
+        break;
+      }
+      case UPDATE: {
+        Object param = method.convertArgsToSqlCommandParam(args);
+        result = rowCountResult(sqlSession.update(command.getName(), param));
+        break;
+      }
+      case DELETE: {
+        Object param = method.convertArgsToSqlCommandParam(args);
+        result = rowCountResult(sqlSession.delete(command.getName(), param));
+        break;
+      }
+        // 🌰栗子为SELECT
+      case SELECT:
+            // 判断是否有返回值
+        if (method.returnsVoid() && method.hasResultHandler()) {
+            // 无返回值
+          executeWithResultHandler(sqlSession, args);
+          result = null;
+        } else if (method.returnsMany()) {
+            // 返回值多行(多参数),这里调用这个方法
+          result = executeForMany(sqlSession, args); 🏀
+        } else if (method.returnsMap()) {
+            // 返回Map
+          result = executeForMap(sqlSession, args);
+        } else if (method.returnsCursor()) {
+            // 返回Cursor
+          result = executeForCursor(sqlSession, args);
+        } else {
+          Object param = method.convertArgsToSqlCommandParam(args);
+          result = sqlSession.selectOne(command.getName(), param);
+        }
+        break;
+      case FLUSH:
+        result = sqlSession.flushStatements();
+        break;
+      default:
+        throw new BindingException("Unknown execution method for: " + command.getName());
+    }
+    if (result == null && method.getReturnType().isPrimitive() && !method.returnsVoid()) {
+      throw new BindingException("Mapper method '" + command.getName() 
+          + " attempted to return null from a method with a primitive return type (" + method.getReturnType() + ").");
+    }
+    return result;
+  }
+```
+
+这个方法中，根据上面获取的不同 type (SELECT|DELETE|UPDATE|INSERT) 和 返回类型 
+
+1、调用 convertArgsToSqlCommandParam() 方法将方法参数转换为 SQL 参数，
+
+2、调用 sqlSession的 insert()、update()、dalete()、selectOne()。本案例是查询，所以调用的是 DefaultSqlSession 中的 selectOne() 方法 。
+
+<br/>
+
+#### **sqlSession.selectOne() 方法** 
+
+```java
+// DefaultSqlSession.java
+public <T> T selectOne(String statement, Object parameter) {
+     List<T> list = this.selectList(statement, parameter);
+     if (list.size() == 1) {
+          // 如果只有一套数据就返回第一条 
+          return list.get(0);
+     } else if (list.size() > 1) {
+          // 常见错误, 方法定义的是返回一条数据《 结果集查出有多条数据, 就会报这个错误 。
+          throw new TooManyResultsException("Expected one result (or null) to be returned by selectOne(), but found: " + list.size());
+     } else {
+          // 数据库中没有查到数据返回 null
+          return null;
+     }
+}
+```
+
+调用的是 `selectList()` 方法 
+
+```java
+public <E> List<E> selectList(String statement, Object parameter) {
+     return this.selectList(statement, parameter, RowBounds.DEFAULT);
+}
+public <E> List<E> selectList(String statement, Object parameter, RowBounds rowBounds) {
+     List var5;
+     try {
+          // 解析XML时生成的对象,解析某一个SQL,会封装成MappedStatement,里面存放了所有执行SQL所需要的信息
+          // 从 configuration 对象中获取 MappedStatement 对象 . 
+          // 此时的 statement=com.tian.mybatis.mapper.UserMapper.selectById
+          MappedStatement ms = this.configuration.getMappedStatement(statement);
+          // 执行执行器中的 query() 方法查询 .
+          var5 = this.executor.query(ms, this.wrapCollection(parameter), rowBounds, Executor.NO_RESULT_HANDLER);
+     } catch (Exception var9) {
+          throw ExceptionFactory.wrapException("Error querying database.  Cause: " + var9, var9);
+     } finally {
+          ErrorContext.instance().reset();
+     }
+
+     return var5;
+}
+```
+
+> 在这里又出现了MappedStatement,通过前文我们了解到MappedStatement对象时解析Mapper.xml配置文件而产生的,用于存储SQL信息,执行SQL需要这个对象保存的关于SQL的信息,而selectList()方法内部调用了Executor对象执行SQL语句,这个Executor对象作为MyBtais四大对象之一. executor.query()
+
+ 在这个方法里是根据 statement 从 configuration 对象中获取 MappedStatement 对象 。
+
+```java
+MappedStatement ms = this.configuration.getMappedStatement(statement);
+```
+
+```java
+// key是statement=com.tian.mybatis.mapper.UserMapper.selectById，value是MappedStatement
+protected final Map<String, MappedStatement> mappedStatements = new Configuration.StrictMap("Mapped Statements collection");
+public MappedStatement getMappedStatement(String id) {
+     return this.getMappedStatement(id, true);
+}
+public MappedStatement getMappedStatement(String id, boolean validateIncompleteStatements) {
+     if (validateIncompleteStatements) {
+          this.buildAllStatements();
+     }
+
+     return (MappedStatement)this.mappedStatements.get(id);
+}
+```
+
+而 MappedStatement 里面有 xml 中增删改查标签配置的所有属性，包括 id、statamentType、sqlSource、入参、返回值等 
+
+![image-20210622111842659](MyBatis源码图集/image-20210622111842659.png)
+
+现在，UserMapper类中的方法已经和 userMapper.xml 中的 sql 关联起来了 。
+
+```java
+var5 = this.executor.query(ms, this.wrapCollection(parameter), rowBounds, Executor.NO_RESULT_HANDLER);
+```
+
+这里执行的是 执行器 Executor 中的 query() 方法 。
+
+<br/>
+
+### 第二部分 
+
+#### **Executor.query()** 
+
+这里的 Executor 对象是在调用 openSession() 方法的时候创建的 。
+
+调用执行器的 query() 方法的整个流程 
+
+![image-20210622115033931](MyBatis源码图集/image-20210622115033931.png)
+
+<br/>
+
+#### **CachingExecutor.query()** 
+
+```java
+public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler) throws SQLException {
+     BoundSql boundSql = ms.getBoundSql(parameterObject);
+     CacheKey key = this.createCacheKey(ms, parameterObject, rowBounds, boundSql);
+     return this.query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+}
+```
+
+BoundSql 中主要是 SQL 和 参数 ：
+
+![image-20210622115634490](MyBatis源码图集/image-20210622115634490.png)
+
+既然是缓存，那么肯定想到 key-value 数据结构。Map
+
+来看看这个 key 的生成规则 ：
+
+这个二级缓存是怎么构成的呢？并且还要保证在查询的时候必须是唯一的 。
+
+```java
+// CachingExecutor.java
+CacheKey key = this.createCacheKey(ms, parameterObject, rowBounds, boundSql);
+public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
+     return this.delegate.createCacheKey(ms, parameterObject, rowBounds, boundSql);
+}
+```
+
+![image-20210622120930955](MyBatis源码图集/image-20210622120930955.png)
+
+![image-20210622120956291](MyBatis源码图集/image-20210622120956291.png)
+
+如此，构成 key 主要有 方法相同、翻页偏移量相同、SQL相同、参数相同、数据源环境相同才会被认为是同一个查询 。
+
+如果要更深入一点，就得把下面这张图的参数扯进来 。
+
+![image-20210622134326698](MyBatis源码图集/image-20210622134326698.png)
 
 
 
 
 
+#### 处理二级缓存
+
+> 首先 MyBatis 在查询时，不会直接查询数据库，而是会先进行二级缓存的查询，二级缓存的作用域是 namespace ，也可以理解为一个 mapper ，所以会判断一下这个 mapper 是否开启了二级缓存 ，如果没有开启，则进行一级缓存继续查询 。
+
+首先是从 MappedStatement 对象中取出 cache 对象，判断 cache 对象是否为 null，如果为 null，则没有查询二级缓存和写入二级缓存的流程操作 。
+
+```java
+// CachingExecutor.java
+public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler) throws SQLException {
+     BoundSql boundSql = ms.getBoundSql(parameterObject);
+     CacheKey key = this.createCacheKey(ms, parameterObject, rowBounds, boundSql);
+     return this.query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+}
+
+public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+     Cache cache = ms.getCache();
+     // 判断是否有二级缓存
+     if (cache != null) {
+          this.flushCacheIfRequired(ms);
+          if (ms.isUseCache() && resultHandler == null) {
+               this.ensureNoOutParams(ms, boundSql);
+               List<E> list = (List)this.tcm.getObject(cache, key);
+               if (list == null) {
+                    list = this.delegate.query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+                    this.tcm.putObject(cache, key, list);
+               }
+
+               return list;
+          }
+     }
+
+     return this.delegate.query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+}
+```
+
+那么这个 Cache 对象是什么时候创建的呢 ？
+
+配置项 ：mybatis-config.xml
+
+```xml
+<configuration>
+ <settings>
+  <setting name="cacheEnabled" value="true|false" />
+ </settings>
+</configuration>
+```
+
+cacheEnabled = true 表示二级缓存可用，但是要开启的话，还需要再 Mapper.xml 内配置 。
+
+```xml
+<cache eviction="FIFO" flushInterval="60000" size="512" readOnly="true"/>
+<!--或者-->
+<cache/>
+```
+
+属性项属性说明 ：
+
+- `flushInterval="60000"` ：间隔 60 秒清空缓存，这个间隔 60 秒，是被动触发的，而不是定时器轮询的 。
+- `size="512"` ：表示队列最大 512 个长度，超过这个长度则移除队列最前面的元素，这里的长度指的是 CacheKey 的个数，默认为 1024 。
+- `readOnly="true"` ：表示任何获取对象的操作，都将返回同一实例对象。如果 `readOnly="false"` ：则每次返回该对象的拷贝对象 ，换言之就是序列化赋值一份返回 。
+- `eviction="FIFO"` ：缓存会使用默认的 Least Recently Used (LRU，最少使用的) 算法来回收。`FIFO` ：First In First Out 先进先出队列 。
+
+<br/>
+
+在解析 Mapper.xml 的 XMLMapperBuilder 类中的 cacheElement() 方法中 ：
+
+```java
+public void parse() {
+     if (!this.configuration.isResourceLoaded(this.resource)) {
+          this.configurationElement(this.parser.evalNode("/mapper"));
+          this.configuration.addLoadedResource(this.resource);
+          this.bindMapperForNamespace();
+     }
+
+     this.parsePendingResultMaps();
+     this.parsePendingCacheRefs();
+     this.parsePendingStatements();
+}
+
+private void configurationElement(XNode context) {
+     try {
+          String namespace = context.getStringAttribute("namespace");
+          if (namespace != null && !namespace.equals("")) {
+               this.builderAssistant.setCurrentNamespace(namespace);
+               this.cacheRefElement(context.evalNode("cache-ref"));
+               this.cacheElement(context.evalNode("cache"));
+               this.parameterMapElement(context.evalNodes("/mapper/parameterMap"));
+               this.resultMapElements(context.evalNodes("/mapper/resultMap"));
+               this.sqlElement(context.evalNodes("/mapper/sql"));
+               this.buildStatementFromContext(context.evalNodes("select|insert|update|delete"));
+          } else {
+               throw new BuilderException("Mapper's namespace cannot be empty");
+          }
+     } catch (Exception var3) {
+          throw new BuilderException("Error parsing Mapper XML. The XML location is '" + this.resource + "'. Cause: " + var3, var3);
+     }
+}
+// 解析二级缓存中的标签 
+private void cacheElement(XNode context) throws Exception {
+     if (context != null) {
+          String type = context.getStringAttribute("type", "PERPETUAL");
+          Class<? extends Cache> typeClass = this.typeAliasRegistry.resolveAlias(type);
+          String eviction = context.getStringAttribute("eviction", "LRU");
+          Class<? extends Cache> evictionClass = this.typeAliasRegistry.resolveAlias(eviction);
+          Long flushInterval = context.getLongAttribute("flushInterval");
+          Integer size = context.getIntAttribute("size");
+          boolean readWrite = !context.getBooleanAttribute("readOnly", false);
+          boolean blocking = context.getBooleanAttribute("blocking", false);
+          Properties props = context.getChildrenAsProperties();
+          this.builderAssistant.useNewCache(typeClass, evictionClass, flushInterval, size, readWrite, blocking, props);
+     }
+
+}
+
+// 创建 Cache 对象 (MapperBuilderAssistant.java)
+public Cache useNewCache(Class<? extends Cache> typeClass, Class<? extends Cache> evictionClass, Long flushInterval, Integer size, boolean readWrite, boolean blocking, Properties props) {
+     Cache cache = (new CacheBuilder(this.currentNamespace)).
+          implementation((Class)this.valueOrDefault(typeClass, PerpetualCache.class)).
+          addDecorator((Class)this.valueOrDefault(evictionClass, LruCache.class)).
+          clearInterval(flushInterval).
+          size(size).
+          readWrite(readWrite).
+          blocking(blocking).
+          properties(props).
+          build();
+     this.configuration.addCache(cache);
+     this.currentCache = cache;
+     return cache;
+}
+```
+
+二级缓存处理完了，咱们来到 BaseExecutor 类的 query() 方法中 。
+
+<br/>
+
+
+
+#### BaseExecutor.query() 
+
+> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException
+
+第一步，清空缓存 
+
+```java
+if (this.queryStack == 0 && ms.isFlushCacheRequired()) {
+     this.clearLocalCache();
+}
+```
+
+queryStack 用于记录查询栈，防止递归查询重复处理缓存 。
+
+`flushCache=true` 的时候，会先清理本地缓存 （一级缓存）。
+
+如果和缓存中没有数据会从数据库中查询 
+
+```java
+list = this.queryFromDatabase(ms, parameter, rowBounds, resultHandler, key, boundSql);
+```
+
+瞅瞅这个 `queryFromDatabase()`方法的逻辑 ：
+
+```java
+private <E> List<E> queryFromDatabase(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+     // 使用占位符的方法，先抢占一级缓存。
+     this.localCache.putObject(key, ExecutionPlaceholder.EXECUTION_PLACEHOLDER);
+
+     List list;
+     try {
+          // 调用doQuery方法查询数据库
+          list = this.doQuery(ms, parameter, rowBounds, resultHandler, boundSql);
+     } finally {
+          // 删除上面抢占的占位符 
+          this.localCache.removeObject(key);
+     }
+
+     // 在缓存中put真实数据
+     this.localCache.putObject(key, list);
+     if (ms.getStatementType() == StatementType.CALLABLE) {
+          this.localOutputParameterCache.putObject(key, parameter);
+     }
+
+     return list;
+}
+```
+
+先在缓存使用占位符占位，然后查询，移除占位符，将数据放入一级缓存中 。
+
+执行 Executor 的 doQuery() 方法，默认使用 SimpleExecutor  
+
+```java
+list = this.doQuery(ms, parameter, rowBounds, resultHandler, boundSql);
+```
+
+接下来瞅瞅 SimpleExecutor 中的 doQuery() 方法 。
+
+<br/>
+
+#### SimpleExecutor.doQuery()
+
+```java
+public <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) throws SQLException {
+     Statement stmt = null;
+
+     List var9;
+     try {
+          // 获取到保存在Configuration中的mybatis-config.xml全局配置文件的信息
+          Configuration configuration = ms.getConfiguration();
+          // 封装,StatementHandler也是MyBatis四大对象之一 
+          StatementHandler handler = configuration.newStatementHandler(this.wrapper, ms, parameter, rowBounds, resultHandler, boundSql);
+          // #{} -> ? SQL语句占位符在这里初始化
+          stmt = this.prepareStatement(handler, ms.getStatementLog());
+          // 执行RoutingStatementHandler的query方法  
+          var9 = handler.query(stmt, resultHandler);
+     } finally {
+          this.closeStatement(stmt);
+     }
+
+     return var9;
+}
+```
+
+<br/>
+
+##### 创建 StatementHandler
+
+在 configuration 中 newStatementHandler() 方法中，创建了一个 StatementHandler ，先得到 RoutingStatementHandler （路由） 。
+
+```java
+public StatementHandler newStatementHandler(Executor executor, MappedStatement mappedStatement, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
+     StatementHandler statementHandler = new RoutingStatementHandler(executor, mappedStatement, parameterObject, rowBounds, resultHandler, boundSql);
+     // 执行 Statementhandler 类型的插件
+     StatementHandler statementHandler = (StatementHandler)this.interceptorChain.pluginAll(statementHandler);
+     return statementHandler;
+}
+```
+
+RoutingStatementHandler 创建的时候是用来创建基本的 Statementhandler 的。这里会根据 MapperStatement 里面的 statementType 属性 决定 StatementHandler 类型 。
+
+```java
+// RoutingStatementHandler.java
+public RoutingStatementHandler(Executor executor, MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
+     switch(ms.getStatementType()) {
+          case STATEMENT:
+               this.delegate = new SimpleStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+               break;
+          case PREPARED:
+               this.delegate = new PreparedStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+               break;
+          case CALLABLE:
+               this.delegate = new CallableStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+               break;
+          default:
+               throw new ExecutorException("Unknown statement type: " + ms.getStatementType());
+     }
+
+}
+```
+
+默认是 PREPARED 。
+
+StatementHandler 里面包含了处理参数的 ParameterHandler 和处理结果集的 Resulthandler 。
+
+```java
+protected BaseStatementHandler(Executor executor, MappedStatement mappedStatement, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
+     this.configuration = mappedStatement.getConfiguration();
+     this.executor = executor;
+     this.mappedStatement = mappedStatement;
+     this.rowBounds = rowBounds;
+     this.typeHandlerRegistry = this.configuration.getTypeHandlerRegistry();
+     this.objectFactory = this.configuration.getObjectFactory();
+     if (boundSql == null) {
+          this.generateKeys(parameterObject);
+          boundSql = mappedStatement.getBoundSql(parameterObject);
+     }
+
+     this.boundSql = boundSql;
+     /*********************************************/
+     this.parameterHandler = this.configuration.newParameterHandler(mappedStatement, parameterObject, boundSql);
+     this.resultSetHandler = this.configuration.newResultSetHandler(executor, mappedStatement, rowBounds, this.parameterHandler, resultHandler, boundSql);
+     /*********************************************/
+}
+```
+
+上面说的这几个对象是被插件拦截的四大对象，所以在创建的时候都要用拦截器的方法进行包装 。
+
+`interceptorChain.pluginAll()` 方法进行包装 。
+
+```java
+public ParameterHandler newParameterHandler(MappedStatement mappedStatement, Object parameterObject, BoundSql boundSql) {
+     ParameterHandler parameterHandler = mappedStatement.getLang().createParameterHandler(mappedStatement, parameterObject, boundSql);
+     parameterHandler = (ParameterHandler)this.interceptorChain.pluginAll(parameterHandler);  🚗🚗🚗
+     return parameterHandler;
+}
+
+public ResultSetHandler newResultSetHandler(Executor executor, MappedStatement mappedStatement, RowBounds rowBounds, ParameterHandler parameterHandler, ResultHandler resultHandler, BoundSql boundSql) {
+     ResultSetHandler resultSetHandler = new DefaultResultSetHandler(executor, mappedStatement, parameterHandler, resultHandler, boundSql, rowBounds);
+     ResultSetHandler resultSetHandler = (ResultSetHandler)this.interceptorChain.pluginAll(resultSetHandler); 🚗🚗🚗
+     return resultSetHandler;
+}
+
+public StatementHandler newStatementHandler(Executor executor, MappedStatement mappedStatement, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
+     StatementHandler statementHandler = new RoutingStatementHandler(executor, mappedStatement, parameterObject, rowBounds, resultHandler, boundSql);
+     StatementHandler statementHandler = (StatementHandler)this.interceptorChain.pluginAll(statementHandler); 🚗🚗🚗
+     return statementHandler;
+}
+
+public Executor newExecutor(Transaction transaction, ExecutorType executorType) {
+     executorType = executorType == null ? this.defaultExecutorType : executorType;
+     executorType = executorType == null ? ExecutorType.SIMPLE : executorType;
+     Object executor;
+     if (ExecutorType.BATCH == executorType) {
+          executor = new BatchExecutor(this, transaction);
+     } else if (ExecutorType.REUSE == executorType) {
+          executor = new ReuseExecutor(this, transaction);
+     } else {
+          executor = new SimpleExecutor(this, transaction);
+     }
+
+     if (this.cacheEnabled) {
+          executor = new CachingExecutor((Executor)executor);
+     }
+
+     Executor executor = (Executor)this.interceptorChain.pluginAll(executor); 🚗🚗🚗
+     return executor;
+}
+```
 
 
 
 
 
+### 创建 Statement
 
+```java
+public <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) throws SQLException {
+     Statement stmt = null;
 
+     List var9;
+     try {
+          Configuration configuration = ms.getConfiguration();
+          StatementHandler handler = configuration.newStatementHandler(this.wrapper, ms, parameter, rowBounds, resultHandler, boundSql);
+          stmt = this.prepareStatement(handler, ms.getStatementLog()); 🎁🎁🎁🎁
+          var9 = handler.query(stmt, resultHandler);
+     } finally {
+          this.closeStatement(stmt);
+     }
 
+     return var9;
+}
+```
+
+创建对象后就会执行 RoutingStatementHandler 的 query() 方法 。
+
+```java
+public <E> List<E> query(Statement statement, ResultHandler resultHandler) throws SQLException {
+     // 委派 RoutingStatementHandler 调用方法  (delegate=RoutingStatementHandler)
+     return this.delegate.query(statement, resultHandler);
+}
+```
+
+这里的设计很有意思，所有的处理都要使用 RoutingStatementHandler 来路由，全部通过委托的方式进行调用 。
+
+然后执行到 PreparedStatementHandler 中的 query() 方法 。
+
+```java
+public <E> List<E> query(Statement statement, ResultHandler resultHandler) throws SQLException {
+     PreparedStatement ps = (PreparedStatement)statement;
+     // JDBC 的流程 。
+     ps.execute();
+     // 处理结果集，如果有插件代理 ResultHandler, 会先走到被拦截的业务逻辑中 。
+     return this.resultSetHandler.handleResultSets(ps);
+}
+```
+
+看到了 `ps.execute();` 表示已经到了熟悉的 JDBC 层面了，这时候 SQL 已经执行完毕。后面调用 DefaultResultSetHandler 类进行处理 。
+
+到这里 ，SQL 语句执行完毕，并将结果结果集赋值并返回 。
+
+<br/>
+
+## 整个流程 
+
+![image-20210622151055830](MyBatis源码图集/image-20210622151055830.png)
+
+从 调用 UserMapper 的 selectById() 方法开始，到 JDBC 执行 SQL 的整个流程图 。
+
+## 总结 
+
+涉及到的涉及模式 ：单例模式 、建造者涉及吗、模板方法模式、代理模式 、装饰器模式。
