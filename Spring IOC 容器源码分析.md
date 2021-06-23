@@ -36,7 +36,7 @@ public static void main(String[] args) {
 
  中寻找 xml 配置问及那，根据 xml 文件内容来构建 ApplicationContext 。当然了，除了 ClassPathXmlApplicationContext 以外，我们也还有其他构建 ApplicationContext 的方案可供选择，我们先来看看大体的继承结构是怎么样的：
 
-![1](Spring IOC 图集/1.png)
+![1](SpringIOC图集/1.png)
 
 我们可以看到 ，ClassPathXmlApplicationContext  兜兜转转好久才到 ApplicationContext 接口，同样的，我们也可以使用绿色的  `FileSystemXmlApplicationContext` 和 `AnnotationConfigApplicationContext` 这两个类 。
 
@@ -107,11 +107,11 @@ BeanFactory ，从名字上也很好理解，生产 bean 的工厂。它负责�
 
 前面说的 ApplicationContext 其实就是一个 BeanFactory。我们来看一下 BeanFactory 接口相关的主要继承结构 ：
 
-![2](Spring IOC 图集/2.png)
+![2](SpringIOC图集/2.png)
 
 类图如下 ：
 
-![image-20210622200953295](Spring IOC 图集/image-20210622200953295.png)
+![image-20210622200953295](SpringIOC图集/image-20210622200953295.png)
 
 重点说明 ：
 
@@ -343,7 +343,7 @@ protected final void refreshBeanFactory() throws BeansException {
 
 我们来说说为什么选择实例化 **DefaultListableBeanFactory** ？前面我们说了有个很重要的接口 ConfigurableListableBeanFactory，它实现了 BeanFactory 第二层的所有三个接口，我们重新过一遍继承图 ：
 
-![2](Spring IOC 图集/2.png)
+![2](SpringIOC图集/2.png)
 
 
 
